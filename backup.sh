@@ -74,7 +74,7 @@ backup_service_full() {
         
         # Arrêt temporaire du service pour cohérence des données
         cd "$SERVICE_PATH"
-        docker-compose down >> $LOG_FILE 2>&1
+        docker compose down >> $LOG_FILE 2>&1
         
         # Sauvegarde des volumes
         if [ -d "$SERVICE_PATH/volumes" ]; then
@@ -84,7 +84,7 @@ backup_service_full() {
         fi
         
         # Redémarrage du service
-        docker-compose up -d >> $LOG_FILE 2>&1
+        docker compose up -d >> $LOG_FILE 2>&1
         echo "  ✅ Service redémarré" >> $LOG_FILE
         cd ~
     else
