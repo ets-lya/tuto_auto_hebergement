@@ -77,7 +77,7 @@ backup_service_full() {
         docker compose down >> $LOG_FILE 2>&1
         
         # Sauvegarde des volumes
-        if [ -d "$SERVICE_PATH/volumes" ]; then
+        if [ -d "$SERVICE_PATH" ]; then
             tar -czf "$BACKUP_DIR/${SERVICE_NAME}_volumes.tar.gz" -C "$SERVICE_PATH" volumes/ 2>> $LOG_FILE
             SIZE=$(du -sh "$BACKUP_DIR/${SERVICE_NAME}_volumes.tar.gz" | awk '{print $1}')
             echo "  ✅ Volumes sauvegardés ($SIZE)" >> $LOG_FILE
