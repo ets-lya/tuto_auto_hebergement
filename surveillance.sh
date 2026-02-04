@@ -119,5 +119,8 @@ else
     fi
 fi
 
+#Affichage du rapport en mode lancement manuel
+cat $RAPPORT
+
 # Nettoyage
 rm $RAPPORT
