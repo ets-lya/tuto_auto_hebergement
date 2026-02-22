@@ -26,26 +26,82 @@ echo "" >> $RAPPORT
 
 # 2. Vérification des images Docker
 echo "🐳 Vérification des images Docker..." >> $RAPPORT
-cd ~
+cd ~/Docker
 DOCKER_UPDATES=""
-for dir in erugo cloudflared nextcloud immich wordpress; do
-    if [ -d "$dir" ]; then
+CURRENT_DIR=""
+
+# Parcourir tous les sous-dossiers contenant un docker-compose
+for dir in */; do
+    dir=${dir%/}  # Enlever le slash final
+    
+    if [ -f "$dir/docker-compose.yml" ] || [ -f "$dir/compose.yml" ]; then
         cd "$dir"
-        CURRENT_IMAGES=$(docker-compose config | grep 'image:' | awk '{print $2}')
+        
+        # Charger les variables d'environnement du .env s'il existe
+        if [ -f ".env" ]; then
+            set -a
+            source .env
+            set +a
+        fi
+        
+        # Récupérer les images avec les variables substituées
+        CURRENT_IMAGES=$(docker compose config 2>/dev/null | grep 'image:' | awk '{print $2}')
+        
+        DIR_UPDATES=""
+        
         for img in $CURRENT_IMAGES; do
-            # Récupère le hash de l'image locale AVANT le pull
-            LOCAL_HASH=$(docker images --no-trunc --quiet "$img" 2>/dev/null | head -1)
+            # Enlever les digests SHA si présents
+            IMAGE_NAME=$(echo "$img" | sed 's/@sha256.*//')
             
-            # Récupère le hash de l'image distante
-            docker pull "$img" > /dev/null 2>&1
-            REMOTE_HASH=$(docker images --no-trunc --quiet "$img" 2>/dev/null | head -1)
+            # Extraire le tag actuel
+            CURRENT_TAG=$(echo "$IMAGE_NAME" | rev | cut -d':' -f1 | rev)
             
-            # Compare les deux hashes
-            if [ ! -z "$LOCAL_HASH" ] && [ "$LOCAL_HASH" != "$REMOTE_HASH" ]; then
-                DOCKER_UPDATES="${DOCKER_UPDATES}    - $img (service: $dir)\n"
-                ALERT=1
+            # Cas 1 : Image avec tag "latest" - comparer les hashes
+            if [[ "$CURRENT_TAG" == "latest" ]]; then
+                LOCAL_HASH=$(docker images --no-trunc --quiet "$IMAGE_NAME" 2>/dev/null | head -1)
+                docker pull "$IMAGE_NAME" > /dev/null 2>&1
+                REMOTE_HASH=$(docker images --no-trunc --quiet "$IMAGE_NAME" 2>/dev/null | head -1)
+                
+                if [ ! -z "$LOCAL_HASH" ] && [ "$LOCAL_HASH" != "$REMOTE_HASH" ]; then
+                    DIR_UPDATES="${DIR_UPDATES}    - $IMAGE_NAME\n"
+                fi
+            
+            # Cas 2 : Image avec version fixe - comparer les versions disponibles
+            else
+                IMAGE_PATH=$(echo "$IMAGE_NAME" | cut -d':' -f1)
+                REGISTRY=$(echo "$IMAGE_NAME" | cut -d'/' -f1)
+                
+                # Récupérer les tags disponibles selon le registre
+                if [[ "$REGISTRY" == "ghcr.io" ]]; then
+                    TAGS_JSON=$(curl -s "https://ghcr.io/v2/${IMAGE_PATH#*/}/tags/list" 2>/dev/null)
+                    AVAILABLE_TAGS=$(echo "$TAGS_JSON" | grep -o '"tags":\[[^]]*\]' | grep -o '"[^"]*"' | sed 's/"//g')
+                elif [[ "$REGISTRY" == "docker.io" ]] || [[ ! "$IMAGE_NAME" =~ "/" ]]; then
+                    # Docker Hub
+                    REPO_PATH=$(echo "$IMAGE_PATH" | sed 's/docker.io\///')
+                    [ -z "$(echo $REPO_PATH | grep '/')" ] && REPO_PATH="library/$REPO_PATH"
+                    AVAILABLE_TAGS=$(curl -s "https://registry.hub.docker.com/v2/repositories/${REPO_PATH}/tags/?page_size=100" 2>/dev/null | grep -o '"name":"[^"]*"' | cut -d'"' -f4)
+                else
+                    # Autres registres
+                    AVAILABLE_TAGS=$(curl -s "https://${REGISTRY}/v2/${IMAGE_PATH#*/}/tags/list" 2>/dev/null | grep -o '"tags":\[[^]]*\]' | grep -o '"[^"]*"' | sed 's/"//g')
+                fi
+                
+                # Filtrer les tags instables et les numéroter
+                STABLE_TAGS=$(echo "$AVAILABLE_TAGS" | grep -viE '(alpha|beta|rc|dev|nightly|unstable|trixie|bookworm|bullseye|buster|stretch|jammy|focal|bionic|xenial|edge|canary|pre|test|snapshot)' | sort -V)
+                
+                # Vérifier si une version plus récente existe
+                LATEST_TAG=$(echo "$STABLE_TAGS" | tail -1)
+                if [ ! -z "$LATEST_TAG" ] && [ "$CURRENT_TAG" != "$LATEST_TAG" ]; then
+                    DIR_UPDATES="${DIR_UPDATES}    - $IMAGE_NAME → ${LATEST_TAG}\n"
+                fi
             fi
         done
+        
+        # Ajouter le bloc du dossier s'il y a des mises à jour
+        if [ ! -z "$DIR_UPDATES" ]; then
+            DOCKER_UPDATES="${DOCKER_UPDATES}📁 $dir\n${DIR_UPDATES}\n"
+            ALERT=1
+        fi
+        
         cd ..
     fi
 done
