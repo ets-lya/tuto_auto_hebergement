@@ -33,10 +33,15 @@ for dir in erugo cloudflared nextcloud immich wordpress; do
         cd "$dir"
         CURRENT_IMAGES=$(docker-compose config | grep 'image:' | awk '{print $2}')
         for img in $CURRENT_IMAGES; do
-            docker pull $img > /dev/null 2>&1
-            LOCAL_HASH=$(docker images --no-trunc --quiet $img | head -1)
-            REMOTE_HASH=$(docker inspect --format='{{.Id}}' $img)
-            if [ "$LOCAL_HASH" != "$REMOTE_HASH" ]; then
+            # Récupère le hash de l'image locale AVANT le pull
+            LOCAL_HASH=$(docker images --no-trunc --quiet "$img" 2>/dev/null | head -1)
+            
+            # Récupère le hash de l'image distante
+            docker pull "$img" > /dev/null 2>&1
+            REMOTE_HASH=$(docker images --no-trunc --quiet "$img" 2>/dev/null | head -1)
+            
+            # Compare les deux hashes
+            if [ ! -z "$LOCAL_HASH" ] && [ "$LOCAL_HASH" != "$REMOTE_HASH" ]; then
                 DOCKER_UPDATES="${DOCKER_UPDATES}    - $img (service: $dir)\n"
                 ALERT=1
             fi
